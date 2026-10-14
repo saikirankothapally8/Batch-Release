@@ -39,17 +39,17 @@ export class Api {
   private http = inject(HttpClient);
   readonly lookups = signal<Lookups | null>(null);
 
-  get<T>(url: string, params: object = {}) { return firstValueFrom(this.http.get<T>('/api/' + url, { params: toParams(params) })); }
-  post<T>(url: string, body: unknown) { return firstValueFrom(this.http.post<T>('/api/' + url, body)); }
-  put<T>(url: string, body: unknown) { return firstValueFrom(this.http.put<T>('/api/' + url, body)); }
-  delete<T>(url: string) { return firstValueFrom(this.http.delete<T>('/api/' + url)); }
+  get<T>(url: string, params: object = {}) { return firstValueFrom(this.http.get<T>('api/' + url, { params: toParams(params) })); }
+  post<T>(url: string, body: unknown) { return firstValueFrom(this.http.post<T>('api/' + url, body)); }
+  put<T>(url: string, body: unknown) { return firstValueFrom(this.http.put<T>('api/' + url, body)); }
+  delete<T>(url: string) { return firstValueFrom(this.http.delete<T>('api/' + url)); }
   upload<T>(url: string, file: File) {
     const fd = new FormData();
     fd.append('file', file, file.name);
-    return firstValueFrom(this.http.post<T>('/api/' + url, fd));
+    return firstValueFrom(this.http.post<T>('api/' + url, fd));
   }
   async download(url: string, fileName: string) {
-    const blob = await firstValueFrom(this.http.get('/api/' + url, { responseType: 'blob' }));
+    const blob = await firstValueFrom(this.http.get('api/' + url, { responseType: 'blob' }));
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = fileName;

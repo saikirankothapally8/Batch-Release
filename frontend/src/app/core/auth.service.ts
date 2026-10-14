@@ -27,7 +27,7 @@ export class AuthService {
   }
 
   async login(username: string, password: string) {
-    const r = await firstValueFrom(this.http.post<{ token: string; expiresAt: string; user: Me }>('/api/auth/login', { username, password }));
+    const r = await firstValueFrom(this.http.post<{ token: string; expiresAt: string; user: Me }>('api/auth/login', { username, password }));
     this.token.set(r.token);
     this.user.set(r.user);
     this.expiresAt = Date.parse(r.expiresAt);
@@ -35,7 +35,7 @@ export class AuthService {
   }
 
   async refreshMe() {
-    const me = await firstValueFrom(this.http.get<Me>('/api/auth/me'));
+    const me = await firstValueFrom(this.http.get<Me>('api/auth/me'));
     this.user.set(me);
     try { sessionStorage.setItem(KEY, JSON.stringify({ token: this.token(), user: me, expiresAt: this.expiresAt })); } catch { }
   }

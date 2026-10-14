@@ -55,8 +55,9 @@ public class SampleData
         _now = _clock.Now;
         _today = _clock.Today;
 
+        SeedDepartments();
         SeedMasterData();
-        SeedSecurity();
+        SeedSecurity(demoUsers: true, DemoPassword);
         _db.PrioritySettings.Add(_settings);
         await _db.SaveChangesAsync();
         SeedTemplates();
@@ -64,15 +65,36 @@ public class SampleData
         await SeedBatchesAsync();
     }
 
+    /// <summary>
+    /// For a real installation (no demo data): departments, the standard roles, prioritisation settings and one
+    /// administrator, so that someone can sign in and set up master data, templates and users. Runs only on an
+    /// empty database.
+    /// </summary>
+    public async Task SeedEssentialsAsync(string adminPassword)
+    {
+        if (await _db.Users.AnyAsync()) return;
+        PasswordService.ValidatePolicy(adminPassword);
+        _now = _clock.Now;
+        _today = _clock.Today;
+        SeedDepartments();
+        SeedSecurity(demoUsers: false, adminPassword);
+        _db.PrioritySettings.Add(_settings);
+        await _db.SaveChangesAsync();
+    }
+
     // ------------------------------------------------------------------ master data
 
-    void SeedMasterData()
+    void SeedDepartments()
     {
         foreach (var (code, name) in new[] { ("MFG", "Manufacturing"), ("PKG", "Packaging"), ("QC", "Quality Control"),
                      ("QMS", "Quality Systems (QMS)"), ("RA", "Regulatory Affairs"), ("QA", "Quality Assurance"),
                      ("WH", "Warehouse"), ("SCM", "Supply Chain") })
             _dept[code] = new Department { Code = code, Name = name };
         _db.Departments.AddRange(_dept.Values);
+    }
+
+    void SeedMasterData()
+    {
 
         _parties["CMO1"] = new ExternalParty { Code = "CMO1", Name = "Medisynth Contract Pharma", PartyType = ExternalPartyType.ContractManufacturer, City = "Ahmedabad", Country = "India", QualityAgreementValidUntil = _today.AddMonths(14) };
         _parties["LAB1"] = new ExternalParty { Code = "LAB1", Name = "Spectra Analytical Labs", PartyType = ExternalPartyType.ContractLab, City = "Hyderabad", Country = "India", QualityAgreementValidUntil = _today.AddMonths(8) };
@@ -112,7 +134,7 @@ public class SampleData
         _db.Customers.AddRange(_customers.Values);
     }
 
-    void SeedSecurity()
+    void SeedSecurity(bool demoUsers, string password)
     {
         var roles = new Dictionary<string, Role>();
         Role R(string name, string desc, params string[] perms)
@@ -146,11 +168,12 @@ public class SampleData
         void U(string username, string fullName, string dept, params string[] roleNames)
         {
             var u = new User { Username = username, FullName = fullName, Email = $"{username}@example.com", Department = _dept[dept], PasswordChangedAt = _now };
-            u.PasswordHash = _passwords.Hash(u, DemoPassword);
+            u.PasswordHash = _passwords.Hash(u, password);
             foreach (var rn in roleNames) u.UserRoles.Add(new UserRole { Role = roles[rn] });
             _users[username] = u;
         }
         U("admin", "System Administrator", "QA", "Administrator");
+        if (!demoUsers) { _db.Users.AddRange(_users.Values); return; }
         U("qa.head", "Anita Rao", "QA", "QA Release Authority");
         U("qa.lead", "Vikram Shetty", "QA", "QA Release Authority");
         U("qa.reviewer", "Priya Nair", "QA", "QA Reviewer");

@@ -7,7 +7,7 @@
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
-    "publish:api": "ng build && rm -rf ../backend/src/BatchReleaseIQ.Api/wwwroot && cp -r dist/frontend/browser ../backend/src/BatchReleaseIQ.Api/wwwroot"
+    "publish:api": "ng build && node scripts/copy-to-api.mjs"
   },
   "private": true,
   "dependencies": {

@@ -12,6 +12,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Development settings (incl. the development-only JWT key) never go to a server. -->
+    <Content Update="appsettings.Development.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\BatchReleaseIQ.Domain\BatchReleaseIQ.Domain.csproj" />
     <ProjectReference Include="..\BatchReleaseIQ.Infrastructure\BatchReleaseIQ.Infrastructure.csproj" />
   </ItemGroup>

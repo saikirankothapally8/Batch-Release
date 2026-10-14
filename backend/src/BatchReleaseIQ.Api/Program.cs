@@ -7,6 +7,16 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
+// `dotnet run -- --export-schema <folder>` writes the SQL scripts for DBAs and exits.
+var exportIndex = Array.IndexOf(args, "--export-schema");
+if (exportIndex >= 0)
+{
+    var folder = args.Length > exportIndex + 1 ? args[exportIndex + 1] : "database";
+    DatabaseSetup.ExportSchemaScripts(folder);
+    Console.WriteLine($"Schema scripts written to {Path.GetFullPath(folder)}");
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 var config = builder.Configuration;
 
@@ -66,13 +76,23 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     await DatabaseSetup.EnsureCreatedAsync(db);
+    var seeder = scope.ServiceProvider.GetRequiredService<SampleData>();
     if (config.GetValue("Database:SeedSampleData", true))
     {
         scope.ServiceProvider.GetRequiredService<AuditScope>().Reason = "Initial sample data load";
-        await scope.ServiceProvider.GetRequiredService<SampleData>().SeedAsync();
+        await seeder.SeedAsync();
+    }
+    else
+    {
+        // Real installation: an empty database gets roles, departments, settings and the 'admin' account.
+        scope.ServiceProvider.GetRequiredService<AuditScope>().Reason = "Initial system setup";
+        await seeder.SeedEssentialsAsync(config["Bootstrap:AdminPassword"] ?? SampleData.DemoPassword);
     }
 }
 
+// IIS virtual directories set the path base automatically; behind a reverse proxy, set PathBase (e.g. /batchrelease).
+if (!string.IsNullOrWhiteSpace(config["PathBase"])) app.UsePathBase(config["PathBase"]);
+app.UseRouting(); // explicit, so routes are matched after the path base is removed
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -85,7 +105,33 @@ app.UseAuthentication();
 app.UseMiddleware<CurrentUserMiddleware>();
 app.UseAuthorization();
 app.MapControllers();
-app.MapFallbackToFile("index.html");
+app.MapGet("/api/health", () => Results.Ok(new { status = "ok" })).AllowAnonymous();
+
+// The Angular app is served from wwwroot once built (`npm run publish:api`). Until then, explain instead of a bare 404.
+var indexFile = Path.Combine(app.Environment.WebRootPath ?? Path.Combine(app.Environment.ContentRootPath, "wwwroot"), "index.html");
+if (File.Exists(indexFile)) app.MapFallbackToFile("index.html");
+else app.MapFallback(() => Results.Content(FrontendNotBuiltPage, "text/html"));
 app.Run();
 
-public partial class Program;
+public partial class Program
+{
+    const string FrontendNotBuiltPage = """
+        <!doctype html><html><head><meta charset="utf-8"><title>Batch Release IQ - API running</title>
+        <style>body{font-family:system-ui,sans-serif;max-width:720px;margin:60px auto;padding:0 16px;line-height:1.5;color:#1a1a19}
+        code,pre{background:#f0efec;border-radius:4px;padding:2px 6px}pre{padding:12px;overflow:auto}</style></head><body>
+        <h1>Batch Release IQ API is running</h1>
+        <p>The database is connected and the API answers at <code>/api</code>. The web application has not been built into this API yet.</p>
+        <h3>Option 1 - serve the app from this API</h3>
+        <pre>cd frontend
+        npm install
+        npm run publish:api</pre>
+        <p>Then restart the API and refresh this page.</p>
+        <h3>Option 2 - run the Angular dev server</h3>
+        <pre>cd frontend
+        npm install
+        npm start</pre>
+        <p>Open <a href="http://localhost:4200">http://localhost:4200</a>. It calls the API through <code>frontend/proxy.conf.json</code>
+        (default <code>http://localhost:5080</code>; change it if Visual Studio runs the API on another port).</p>
+        </body></html>
+        """;
+}
