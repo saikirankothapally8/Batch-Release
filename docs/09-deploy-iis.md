@@ -93,4 +93,5 @@ Browse to `https://batchrelease.company.local/` – the login page appears. `/ap
 | Page says "Batch Release IQ API is running … not been built" | `wwwroot` is missing – run `npm run publish:api` before `dotnet publish` |
 | Blank page or 404 for `main-*.js` under a sub-path | Front end built without `--base-href /<alias>/` |
 | Login works but you are signed out on every page | Different `Jwt:SigningKey` on servers behind a load balancer – use the same key everywhere |
+| Viewing works but saving fails with **405 Method Not Allowed** (`Allow: GET, HEAD, OPTIONS, TRACE`) | IIS WebDAV blocks PUT/DELETE. The `web.config` shipped since this version removes it; for an older deployment add `<remove name="WebDAVModule" />` under `<modules>` and `<remove name="WebDAV" />` under `<handlers>` in `web.config` (or uninstall the *WebDAV Publishing* IIS feature) |
 | `/swagger` returns 404 | Expected – the API explorer is only enabled in Development |
