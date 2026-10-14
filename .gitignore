@@ -16,3 +16,4 @@ dist/
 # Local secrets
 appsettings.Local.json
 *.env
+backend/src/BatchReleaseIQ.Api/wwwroot/

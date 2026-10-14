@@ -1,0 +1,476 @@
+<div class="page">
+  @if (error()) {<p class="callout danger">{{ error() }}</p>}
+  @if (b(); as b) {
+    <!-- ================= header ================= -->
+    <div class="head card">
+      <div class="head-main">
+        <div class="crumbs small"><a routerLink="/batches">Batches</a> / {{ b.summary.batchNo }}</div>
+        <div class="title-row">
+          <h1>{{ b.summary.batchNo }}</h1>
+          <brq-status [value]="b.summary.disposition" />
+          @if (active()) {<brq-status [value]="b.summary.priority" [label]="b.summary.priority + ' priority'" />}
+          @if (b.details.batchType !== 'Commercial') {<span class="tag">{{ b.details.batchType }}</span>}
+        </div>
+        <div class="secondary">{{ b.details.product.name }} {{ b.details.product.strength }} {{ b.details.product.strengthUnit }} · {{ b.details.product.code }}
+          · {{ b.details.site.name }}@if (b.details.site.siteType === 'ContractManufacturer') { <span class="tag">CMO</span>}
+          @if (b.details.customer) { · {{ b.details.customer.name }}}</div>
+        <div class="flags-row"><brq-flags [flags]="b.summary.flags" /></div>
+        @if (b.details.dispositionReason) {<p class="callout warn small">{{ b.details.disposition | label }}: {{ b.details.dispositionReason }}</p>}
+        <p class="why-box">{{ b.summary.explanation }}</p>
+      </div>
+      <div class="head-side">
+        <div class="ready-big">
+          <div class="ready-num">{{ b.summary.readiness | number: '1.0-1' }}<small>%</small></div>
+          <div class="small muted">ready
+            @if (b.penalty > 0) {<span> ({{ b.completionPct | number: '1.0-1' }}% done − {{ b.penalty }} penalty)</span>}</div>
+          <brq-readiness [value]="b.summary.readiness" />
+        </div>
+        <dl class="facts">
+          <div><dt>Deadline</dt><dd>{{ b.summary.deadline | dmy }} <span class="small muted">{{ b.summary.deadlineType | label }}</span></dd></div>
+          @if (!b.summary.isReleased && b.summary.estimatedReleaseDate) {<div><dt>Estimated release</dt><dd>{{ b.summary.estimatedReleaseDate | dmy }} <span class="small muted">~{{ b.summary.estimatedDaysToRelease }} d</span></dd></div>}
+          @if (b.summary.releasedAt) {<div><dt>Released</dt><dd>{{ b.summary.releasedAt | dmyt }}</dd></div>}
+          <div><dt>Shelf life left</dt><dd>{{ b.remainingShelfLifePct }}% <span class="small muted">min {{ b.minShelfLifePct }}% at dispatch</span></dd></div>
+          <div><dt>Dispatch by</dt><dd>{{ b.summary.dispatchBy | dmy }}</dd></div>
+        </dl>
+      </div>
+      <div class="head-actions no-print">
+        @if (active() && auth.has(P.release)) {<button class="btn primary" (click)="openRelease()">Release…</button>}
+        @if (undispatched() > 0 && auth.has(P.dispatch) && b.summary.disposition !== 'Recalled') {<button class="btn" (click)="openDispatch()">Record dispatch</button>}
+        @if (active() && auth.has(P.hold)) {
+          @if (['OnHold','Quarantine','UnderInvestigation'].includes(b.summary.disposition)) {<button class="btn" (click)="openDispo('InProgress')">Lift hold</button>}
+          @else {<button class="btn" (click)="openDispo('OnHold')">Hold…</button>}
+        }
+        @if (active() && auth.has(P.changeRequest)) {<button class="btn" (click)="openChange('AddItem')">Request checklist change</button>}
+        @if (active() && auth.has(P.reject)) {<button class="btn danger" (click)="openDispo('Rejected')">Reject…</button>}
+        @if ((b.summary.isReleased || b.releasedQuantity > 0) && b.summary.disposition !== 'Recalled' && auth.has(P.reject)) {<button class="btn danger" (click)="openDispo('Recalled')">Recall…</button>}
+        <button class="btn" (click)="print()">Print</button>
+      </div>
+    </div>
+
+    <!-- ================= tabs ================= -->
+    <div class="tabs no-print" role="tablist">
+      <button [class.active]="tab() === 'map'" (click)="pickTab('map')">Batch map</button>
+      <button [class.active]="tab() === 'checklist'" (click)="pickTab('checklist')">Checklist<span class="count">{{ pendingMandatory().length }} open</span></button>
+      <button [class.active]="tab() === 'markets'" (click)="pickTab('markets')">Markets & regulatory<span class="count">{{ b.markets.length }}</span></button>
+      <button [class.active]="tab() === 'quality'" (click)="pickTab('quality')">Quality events<span class="count">{{ openEvents().length }} open</span></button>
+      <button [class.active]="tab() === 'movements'" (click)="pickTab('movements')">External parties<span class="count">{{ b.movements.length }}</span></button>
+      <button [class.active]="tab() === 'releases'" (click)="pickTab('releases')">Release & dispatch</button>
+      <button [class.active]="tab() === 'genealogy'" (click)="pickTab('genealogy')">Genealogy<span class="count">{{ b.children.length + (b.parent ? 1 : 0) }}</span></button>
+      <button [class.active]="tab() === 'changes'" (click)="pickTab('changes')">Changes & signatures<span class="count">{{ pendingChanges().length }} pending</span></button>
+      @if (auth.has(P.audit)) {<button [class.active]="tab() === 'audit'" (click)="pickTab('audit')">Audit trail</button>}
+    </div>
+
+    @switch (tab()) {
+      @case ('map') {
+        <div class="card"><div class="card-head"><div><h3>Batch map</h3><p>Every stage as a lane, with its testing, QMS, regulatory, external-party and warehouse data. Click any box or line to open it.</p></div></div>
+          <div class="card-body"><brq-batch-map [batch]="b" (navigate)="onMap($event)" /></div></div>
+      }
+      <!-- ================= checklist ================= -->
+      @case ('checklist') {
+        <div class="grid two-col">
+          <div class="card">
+            <div class="card-head"><div><h3>Checklist</h3><p>Template: {{ b.templateName }} v{{ b.details.templateVersion }}. Items in the same step can run in parallel.</p></div></div>
+            <div class="card-body flush">
+              @for (g of stages(); track g.stage + g.sequence) {
+                <div class="stage">
+                  <div class="stage-head"><span class="seq">{{ g.sequence }}</span>{{ g.stage }}</div>
+                  @for (i of g.items; track i.id) {
+                    <div class="item" [id]="'item-' + i.id" [class.focused]="focus() === 'item-' + i.id" [class.done]="isDone(i)" [class.blocked]="i.status === 'Blocked'" [class.final]="i.isFinalRelease">
+                      <div class="item-main">
+                        <div class="item-title">
+                          <brq-status [value]="i.status" />
+                          <b>{{ i.name }}</b>@if (i.market) { <span class="tag">{{ i.market }}</span>}
+                          @if (!i.isMandatory) {<span class="tag">optional</span>}
+                        </div>
+                        <div class="small muted">{{ i.department }} · {{ i.itemType | label }} · weight {{ i.weight }} · due {{ i.dueDate | dmy }}
+                          @if (i.completedAt) { · {{ i.status === 'NotApplicable' ? 'N/A by' : 'done by' }} {{ i.completedBy ?? 'system' }} {{ i.completedAt | dmyt }}}
+                          @else if (i.startedAt) { · started {{ i.startedAt | dmyt }}}</div>
+                        <div class="small">
+                          <span class="source" [class.manual]="i.source === 'Manual'">Source: {{ i.source === 'Manual' ? 'Manual entry' : i.source }}</span>
+                          @if (i.sourceReference) {<span class="source"> · {{ i.sourceReference }}</span>}
+                          @if (i.lastSyncedAt && i.source !== 'Manual') {<span class="source"> · last sync {{ i.lastSyncedAt | dmyt }}</span>}
+                        </div>
+                        @if (i.openDependencies.length) {<div class="small dep">Waiting on: {{ i.openDependencies.join(', ') }}</div>}
+                        @if (i.blockedReason) {<div class="small error">Blocked: {{ i.blockedReason }}</div>}
+                        @if (i.notApplicableJustification) {<div class="small secondary">N/A justification: {{ i.notApplicableJustification }}</div>}
+                        @if (i.comments) {<div class="small secondary">“{{ i.comments }}”</div>}
+                        @if (i.evidenceReference || i.evidence.length) {
+                          <div class="small">Evidence: {{ i.evidenceReference }}
+                            @for (e of i.evidence; track e.id) {<button class="link small" (click)="downloadEvidence(e)" [title]="'SHA-256 ' + e.sha256">📎 {{ e.fileName }}</button> }</div>
+                        }
+                      </div>
+                      <div class="item-actions no-print">
+                        @if (i.isFinalRelease) {
+                          @if (!isDone(i) && auth.has(P.release) && active()) {<button class="btn sm primary" (click)="openRelease()">Release…</button>}
+                        } @else if (canAct(i)) {
+                          @if (i.status === 'NotStarted' && !i.openDependencies.length) {<button class="btn sm" (click)="openItem(i, 'InProgress')">Start</button>}
+                          @if (!isDone(i) && !i.openDependencies.length) {<button class="btn sm primary" (click)="openItem(i, 'Completed')">Complete</button>}
+                          @if (!isDone(i)) {
+                            <details class="more"><summary class="btn sm">More</summary>
+                              <div class="menu">
+                                <button class="link" (click)="openItem(i, 'Blocked')">Mark blocked</button>
+                                <button class="link" (click)="openItem(i, 'NotApplicable')">Not applicable…</button>
+                                <label class="link">Attach evidence<input type="file" hidden (change)="upload(i, $event)" /></label>
+                                @if (auth.has(P.changeRequest)) {<button class="link" (click)="openChange('EditItem', i)">Request edit…</button>
+                                  <button class="link" (click)="openChange('RemoveItem', i)">Request removal…</button>}
+                              </div>
+                            </details>
+                          } @else if (!b.summary.isReleased) {<button class="btn sm" (click)="openItem(i, 'NotStarted')">Reopen</button>}
+                        }
+                      </div>
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+          </div>
+          <div class="side">
+            <div class="card">
+              <div class="card-head"><h3>Batch details</h3></div>
+              <div class="card-body">
+                <dl class="kv">
+                  <div><dt>Batch size</dt><dd>{{ b.details.batchSize | number }} {{ b.details.batchSizeUnit }}</dd></div>
+                  <div><dt>LOT type</dt><dd>{{ b.details.lotType }}</dd></div>
+                  <div><dt>Mfg block</dt><dd>{{ b.details.manufacturingBlock || '—' }}</dd></div>
+                  <div><dt>Process order</dt><dd>{{ b.details.processOrderDate | dmy }}</dd></div>
+                  <div><dt>Manufactured</dt><dd>{{ b.details.manufacturingDate | dmy }}</dd></div>
+                  <div><dt>Completed</dt><dd>{{ b.details.batchCompletionDate | dmy }}</dd></div>
+                  <div><dt>Target release</dt><dd>{{ b.details.targetReleaseDate | dmy }}</dd></div>
+                  <div><dt>Shelf life</dt><dd>{{ b.details.shelfLifeMonths }} months</dd></div>
+                  <div><dt>Expiry</dt><dd>{{ b.details.expiryDate | dmy }}</dd></div>
+                  <div><dt>Pack size</dt><dd>{{ b.details.product.packSize }}</dd></div>
+                  <div><dt>Created</dt><dd>{{ b.details.createdAt | dmyt }}<div class="small muted">{{ b.details.createdBy }}</div></dd></div>
+                  <div><dt>Markets</dt><dd>@for (m of b.markets; track m.id) {<span class="tag">{{ m.code }}</span>}</dd></div>
+                </dl>
+                @if (b.details.expiryOverrideReason) {<p class="small callout">Expiry note: {{ b.details.expiryOverrideReason }}</p>}
+              </div>
+            </div>
+            @if (openEvents().length) {
+              <div class="card">
+                <div class="card-head"><h3>Open quality events</h3></div>
+                <div class="card-body">
+                  @for (e of openEvents(); track e.id) {<div class="mini-row"><brq-status [value]="e.criticality" /> <b>{{ e.number }}</b> {{ e.description }} <span class="small muted">{{ e.ageDays }} d open</span></div>}
+                </div>
+              </div>
+            }
+            @if (b.parent || b.children.length) {
+              <div class="card">
+                <div class="card-head"><h3>Linked batches</h3></div>
+                <div class="card-body">
+                  @if (b.parent) {<div class="mini-row">Parent: <a [routerLink]="['/batches', b.parent.id]">{{ b.parent.batchNo }}</a> <brq-status [value]="b.parent.disposition" /></div>}
+                  @for (c of b.children; track c.id) {<div class="mini-row">{{ c.batchType }}: <a [routerLink]="['/batches', c.id]">{{ c.batchNo }}</a> <brq-status [value]="c.disposition" /></div>}
+                </div>
+              </div>
+            }
+          </div>
+        </div>
+      }
+
+      <!-- ================= markets ================= -->
+      @case ('markets') {
+        <div class="card">
+          <div class="card-head"><div><h3>Target markets</h3><p>Each market carries its own regulatory approval and minimum shelf life at dispatch. Approving a market completes its regulatory checklist item.</p></div>
+            @if (auth.has(P.market) && active()) {<button class="btn" (click)="openMk()">+ Add market</button>}</div>
+          <table class="data">
+            <thead><tr><th>Market</th><th>Authority</th><th>Regulatory status</th><th>Approval reference</th><th>Approved on</th><th>Min shelf life</th><th>Source</th><th></th></tr></thead>
+            <tbody>
+              @for (m of b.markets; track m.id) {
+                <tr [id]="'mk-' + m.marketId" [class.focused]="focus() === 'mk-' + m.marketId"><td><b>{{ m.code }}</b> {{ m.name }}</td><td>{{ m.regulatoryAuthority }}</td><td><brq-status [value]="m.regulatoryStatus" /></td>
+                  <td>{{ m.approvalReference || '—' }}</td><td>{{ m.approvedAt | dmyt }}</td><td>{{ m.minShelfLifePctAtDispatch }}%</td>
+                  <td class="small"><span class="source" [class.manual]="m.source === 'Manual'">{{ m.source }}</span>@if (m.lastSyncedAt) {<div class="source">sync {{ m.lastSyncedAt | dmyt }}</div>}</td>
+                  <td>@if (auth.has(P.market) && active()) {<button class="btn sm" (click)="openMk(m)">Update</button>}</td></tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+
+      <!-- ================= quality ================= -->
+      @case ('quality') {
+        <div class="card">
+          <div class="card-head"><div><h3>Quality events</h3><p>Deviation, OOS, OOT, CAPA and Change Control linked to this batch. Open events lower readiness and block a full release.</p></div>
+            @if (auth.has(P.quality)) {<button class="btn" (click)="openQe()">+ Record event</button>}</div>
+          <table class="data">
+            <thead><tr><th>Number</th><th>Type</th><th>Description</th><th>Criticality</th><th>Status</th><th>Opened</th><th>Closed</th><th class="num">Age (d)</th><th>Source</th><th></th></tr></thead>
+            <tbody>
+              @for (e of b.qualityEvents; track e.id) {
+                <tr [id]="'qe-' + e.id" [class.focused]="focus() === 'qe-' + e.id"><td class="nowrap"><b>{{ e.number }}</b></td><td>{{ e.eventType | label }}</td><td>{{ e.description }}</td><td><brq-status [value]="e.criticality" /></td>
+                  <td><brq-status [value]="e.status" /></td><td class="nowrap">{{ e.openedOn | dmy }}</td><td class="nowrap">{{ e.closedOn | dmy }}</td><td class="num">{{ e.ageDays }}</td>
+                  <td class="small"><span class="source" [class.manual]="e.source === 'Manual'">{{ e.source }}</span></td>
+                  <td>@if (auth.has(P.quality)) {<button class="btn sm" (click)="openQe(e)">Edit</button>}</td></tr>
+              } @empty {<tr><td colspan="10" class="empty">No quality events linked to this batch.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      }
+
+      <!-- ================= movements ================= -->
+      @case ('movements') {
+        <div class="card">
+          <div class="card-head"><div><h3>External parties</h3><p>Material sent to a contract manufacturer, contract lab, packaging or labelling vendor – sent, at vendor, returned.</p></div>
+            @if (auth.has(P.movement)) {<button class="btn" (click)="openMv()">+ Record movement</button>}</div>
+          <table class="data">
+            <thead><tr><th>Party</th><th>Purpose</th><th>Status</th><th>Sent</th><th>At vendor</th><th>Expected back</th><th>Returned</th><th class="num">Days out</th><th>Qty</th><th>Reference</th><th></th></tr></thead>
+            <tbody>
+              @for (m of b.movements; track m.id) {
+                <tr [id]="'mv-' + m.id" [class.focused]="focus() === 'mv-' + m.id"><td><b>{{ m.party }}</b><div class="small muted">{{ m.partyType | label }}</div></td><td>{{ m.purpose | label }}<div class="small muted">{{ m.description }}</div></td>
+                  <td><brq-status [value]="m.status" />@if (m.overdue) {<div class="small error">return overdue</div>}</td>
+                  <td class="nowrap">{{ m.sentOn | dmy }}</td><td class="nowrap">{{ m.receivedByVendorOn | dmy }}</td><td class="nowrap">{{ m.expectedReturnOn | dmy }}</td>
+                  <td class="nowrap">{{ m.returnedOn | dmy }}</td><td class="num">{{ m.daysAtVendor ?? '—' }}</td><td class="nowrap">{{ m.quantity | number }} {{ m.unit }}</td><td>{{ m.reference }}</td>
+                  <td>@if (auth.has(P.movement)) {<button class="btn sm" (click)="openMv(m)">Update</button>}</td></tr>
+              } @empty {<tr><td colspan="11" class="empty">Nothing sent outside the site for this batch.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      }
+
+      <!-- ================= releases ================= -->
+      @case ('releases') {
+        <div class="grid cols-2">
+          <div class="card">
+            <div class="card-head"><div><h3>Release decisions</h3><p>{{ b.releasedQuantity | number }} of {{ b.details.batchSize | number }} {{ b.details.batchSizeUnit }} released</p></div></div>
+            <table class="data">
+              <thead><tr><th>When</th><th>Kind</th><th class="num">Quantity</th><th>Signed by</th><th>Justification / pending</th></tr></thead>
+              <tbody>
+                @for (r of b.releases; track r.id) {
+                  <tr><td class="nowrap">{{ r.releasedAt | dmyt }}</td><td>{{ r.kind | label }}@if (r.market) { <span class="tag">{{ r.market }}</span>}</td>
+                    <td class="num">{{ r.quantity | number }}</td><td>{{ r.signedBy }}<div class="small muted">{{ r.meaning }}</div></td>
+                    <td class="small">{{ r.justification }}@if (r.pendingItemsSummary) {<div class="muted">Pending at release: {{ r.pendingItemsSummary }}</div>}</td></tr>
+                } @empty {<tr><td colspan="5" class="empty">Not released yet.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <div class="card">
+            <div class="card-head"><div><h3>Dispatch from warehouse</h3>
+              <p>{{ b.dispatchedQuantity | number }} dispatched · {{ undispatched() | number }} released but in warehouse
+                @if (b.warehouseAgeDays !== null) { · aged {{ b.warehouseAgeDays }} days since release}</p></div>
+              @if (undispatched() > 0 && auth.has(P.dispatch)) {<button class="btn" (click)="openDispatch()">Record dispatch</button>}</div>
+            <table class="data">
+              <thead><tr><th>Dispatched</th><th class="num">Quantity</th><th>Market</th><th>Reference</th></tr></thead>
+              <tbody>
+                @for (d of b.dispatches; track d.id) {<tr><td>{{ d.dispatchedOn | dmy }}</td><td class="num">{{ d.quantity | number }}</td><td>{{ d.market }}</td><td>{{ d.reference }}</td></tr>}
+                @empty {<tr><td colspan="4" class="empty">No dispatches.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      }
+
+      <!-- ================= genealogy ================= -->
+      @case ('genealogy') {
+        <div class="card">
+          <div class="card-head"><div><h3>Genealogy</h3><p>Rework, reprocessing, repacking and relabelling create a child batch linked to this one.</p></div>
+            @if (auth.has(P.batchCreate)) {<div class="row"><button class="btn sm" (click)="newChild('Relabel')">+ Relabel</button><button class="btn sm" (click)="newChild('Repack')">+ Repack</button><button class="btn sm" (click)="newChild('Rework')">+ Rework</button></div>}</div>
+          <table class="data">
+            <thead><tr><th>Relation</th><th>Batch</th><th>Type</th><th>Status</th><th>Readiness</th><th>Expiry</th></tr></thead>
+            <tbody>
+              @if (b.parent; as p) {<tr><td>Parent</td><td><a [routerLink]="['/batches', p.id]">{{ p.batchNo }}</a></td><td>{{ p.batchType }}</td><td><brq-status [value]="p.disposition" /></td><td><brq-readiness [value]="p.readiness" /></td><td>{{ p.expiryDate | dmy }}</td></tr>}
+              <tr class="self"><td>This batch</td><td><b>{{ b.summary.batchNo }}</b></td><td>{{ b.summary.batchType }}</td><td><brq-status [value]="b.summary.disposition" /></td><td><brq-readiness [value]="b.summary.readiness" /></td><td>{{ b.summary.expiryDate | dmy }}</td></tr>
+              @for (c of b.children; track c.id) {<tr><td>Child</td><td><a [routerLink]="['/batches', c.id]">{{ c.batchNo }}</a></td><td>{{ c.batchType }}</td><td><brq-status [value]="c.disposition" /></td><td><brq-readiness [value]="c.readiness" /></td><td>{{ c.expiryDate | dmy }}</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      }
+
+      <!-- ================= changes ================= -->
+      @case ('changes') {
+        <div class="grid cols-2">
+          <div class="card">
+            <div class="card-head"><div><h3>Checklist change requests</h3><p>Changes after creation take effect only when someone other than the requester approves them with an e-signature.</p></div></div>
+            <table class="data">
+              <thead><tr><th>Requested</th><th>Change</th><th>Reason</th><th>Status</th><th></th></tr></thead>
+              <tbody>
+                @for (c of b.changeRequests; track c.id) {
+                  <tr><td class="nowrap">{{ c.requestedAt | dmyt }}<div class="small muted">{{ c.requestedBy }}</div></td>
+                    <td>{{ c.changeType | label }}: <b>{{ c.proposedName || c.itemName }}</b></td><td class="small">{{ c.reason }}</td>
+                    <td><brq-status [value]="c.status" />@if (c.decidedBy) {<div class="small muted">{{ c.decidedBy }} {{ c.decidedAt | dmyt }}</div>}</td>
+                    <td class="nowrap">@if (c.status === 'Pending' && auth.has(P.changeApprove)) {
+                      <button class="btn sm primary" (click)="decision.set({ cr: c, approve: true })">Approve</button>
+                      <button class="btn sm" (click)="decision.set({ cr: c, approve: false })">Reject</button>}</td></tr>
+                } @empty {<tr><td colspan="5" class="empty">No checklist changes requested.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <div class="card">
+            <div class="card-head"><div><h3>Electronic signatures</h3><p>Signer, meaning and time are stored with the record and bound to it by a hash.</p></div></div>
+            <table class="data">
+              <thead><tr><th>Signed</th><th>Signer</th><th>Meaning</th><th>Record hash</th></tr></thead>
+              <tbody>
+                @for (s of b.signatures; track s.id) {<tr><td class="nowrap">{{ s.signedAt | dmyt }}</td><td>{{ s.fullName }}<div class="small muted">{{ s.username }}</div></td><td>{{ s.meaning }}</td><td class="mono" [title]="s.recordHash">{{ s.recordHash.slice(0, 12) }}…</td></tr>}
+                @empty {<tr><td colspan="4" class="empty">No signatures yet.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      }
+
+      <!-- ================= audit ================= -->
+      @case ('audit') {
+        <div class="card">
+          <div class="card-head"><div><h3>Audit trail</h3><p>Who, what, when, why, old and new value. Entries cannot be edited or deleted.</p></div></div>
+          <div class="table-scroll" style="max-height: 70vh">
+            <table class="data compact">
+              <thead><tr><th>When</th><th>User</th><th>Action</th><th>Record</th><th>Field</th><th>Old value</th><th>New value</th><th>Reason</th></tr></thead>
+              <tbody>
+                @for (a of audit(); track a.id) {
+                  <tr><td class="nowrap">{{ a.timestamp | dmyt }}</td><td>{{ a.username }}</td><td>{{ a.action }}</td><td class="nowrap">{{ a.entityType }} #{{ a.entityId }}</td>
+                    <td>{{ a.fieldName }}</td><td class="small audit-val">{{ a.oldValue }}</td><td class="small audit-val">{{ a.newValue }}</td><td class="small">{{ a.reason }}</td></tr>
+                } @empty {<tr><td colspan="8" class="empty">No entries.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      }
+    }
+
+    <!-- ================= modals ================= -->
+    <brq-modal [open]="!!itemTarget()" [title]="itemTitle()" (close)="itemTarget.set(null)">
+      @if (itemTarget(); as i) {
+        <form class="form" (ngSubmit)="saveItem()">
+          <p><b>{{ i.name }}</b>@if (i.market) { ({{ i.market }})} – {{ i.department }}</p>
+          @if (i.source !== 'Manual' && i.source !== 'System' && itemAction === 'Completed') {<p class="callout warn small">This item is normally completed by {{ i.source }}. Completing it here records a manual entry.</p>}
+          @if (itemAction === 'NotApplicable') {<label class="field"><span>Justification<em class="req">*</em></span><textarea name="j" [(ngModel)]="itemForm.justification" rows="3" required></textarea></label>}
+          @if (itemAction === 'Blocked') {<label class="field"><span>Blocked reason<em class="req">*</em></span><textarea name="br" [(ngModel)]="itemForm.blockedReason" rows="3" required></textarea></label>}
+          @if (itemAction === 'NotStarted') {<label class="field"><span>Reason for reopening<em class="req">*</em></span><textarea name="rr" [(ngModel)]="itemForm.reason" rows="2" required></textarea></label>}
+          @if (itemAction === 'Completed') {<label class="field"><span>Evidence reference (document no, LIMS sample id…)</span><input name="ev" [(ngModel)]="itemForm.evidenceReference" /></label>}
+          <label class="field"><span>Comment</span><textarea name="c" [(ngModel)]="itemForm.comments" rows="2"></textarea></label>
+          @if (modalError()) {<p class="error">{{ modalError() }}</p>}
+          <div class="actions"><button type="button" class="btn" (click)="itemTarget.set(null)">Cancel</button><button class="btn primary" [disabled]="busy()">Save</button></div>
+        </form>
+      }
+    </brq-modal>
+
+    <brq-sign [open]="releaseOpen()" title="Release batch {{ b.summary.batchNo }}" [meaning]="releaseMeaning()" [signer]="auth.user()?.fullName ?? ''"
+              [busy]="busy()" [error]="modalError()" (signed)="doRelease($event)" (cancel)="releaseOpen.set(false)">
+      <div class="form-grid release-grid">
+        <label class="field span-2"><span>Release type</span>
+          <select name="kind" [(ngModel)]="release.kind">
+            <option value="Full">Full release ({{ remainingQty() | number }} {{ b.details.batchSizeUnit }})</option>
+            <option value="Partial">Partial release (part released, part held)</option>
+            @if (auth.has(P.releaseConditional)) {<option value="Conditional">Conditional – with pending items</option>}
+            <option value="FurtherProcessing">For further processing (relabel/repack)</option>
+          </select></label>
+        @if (release.kind === 'Partial') {<label class="field"><span>Quantity</span><input name="q" type="number" [(ngModel)]="release.quantity" [max]="remainingQty()" min="1" /></label>}
+        <label class="field"><span>For market</span><select name="mkt" [(ngModel)]="release.marketId"><option [ngValue]="null">All target markets</option>
+          @for (m of b.markets; track m.id) {<option [ngValue]="m.marketId">{{ m.code }}</option>}</select></label>
+        <label class="field span-4"><span>Justification@if (release.kind === 'Conditional') {<em class="req">*</em>}</span>
+          <textarea name="just" [(ngModel)]="release.justification" rows="2"></textarea></label>
+      </div>
+      @if (pendingMandatory().length || openEvents().length) {
+        <div class="callout warn small">
+          @if (pendingMandatory().length) {<div><b>{{ pendingMandatory().length }} mandatory item(s) pending:</b> @for (p of pendingMandatory(); track p.id) {{{ p.name }}@if (p.market) { ({{ p.market }})}; }</div>}
+          @if (openEvents().length) {<div><b>{{ openEvents().length }} open quality event(s):</b> @for (e of openEvents(); track e.id) {{{ e.number }}; }</div>}
+          <div>A full release is not possible. A conditional release records these as pending under your justification.</div>
+        </div>
+      } @else {<p class="callout small">All mandatory items are complete and no quality events are open.</p>}
+    </brq-sign>
+
+    <brq-modal [open]="dispoOpen()" [title]="dispo.disposition === 'InProgress' ? 'Lift hold' : 'Set batch to ' + humanize(dispo.disposition)" (close)="dispoOpen.set(false)">
+      <form class="form" (ngSubmit)="doDispo()">
+        @if (!['InProgress','Rejected','Recalled'].includes(dispo.disposition)) {
+          <label class="field"><span>Hold type</span><select name="d" [(ngModel)]="dispo.disposition">
+            <option value="OnHold">QA hold</option><option value="Quarantine">Quarantine</option><option value="UnderInvestigation">Under investigation</option></select></label>
+        }
+        <label class="field"><span>Reason<em class="req">*</em></span><textarea name="r" [(ngModel)]="dispo.reason" rows="3" required></textarea></label>
+        @if (needsSignature()) {
+          <div class="sign-manifest"><div><span class="muted">Signing as</span> <b>{{ auth.user()?.fullName }}</b></div><div><span class="muted">Meaning</span> <b>Batch {{ dispo.disposition === 'Rejected' ? 'rejected' : 'recalled' }}</b></div></div>
+          <label class="field"><span>Password<em class="req">*</em></span><input type="password" name="pw" [(ngModel)]="dispo.password" autocomplete="current-password" /></label>
+        }
+        @if (modalError()) {<p class="error">{{ modalError() }}</p>}
+        <div class="actions"><button type="button" class="btn" (click)="dispoOpen.set(false)">Cancel</button>
+          <button class="btn" [class.danger]="needsSignature()" [class.primary]="!needsSignature()" [disabled]="busy() || !dispo.reason.trim() || (needsSignature() && !dispo.password)">Confirm</button></div>
+      </form>
+    </brq-modal>
+
+    <brq-modal [open]="dispatchOpen()" title="Record dispatch" (close)="dispatchOpen.set(false)">
+      <form class="form" (ngSubmit)="doDispatch()">
+        <div class="form-grid">
+          <label class="field span-2"><span>Quantity (max {{ undispatched() | number }})</span><input type="number" name="q" [(ngModel)]="dispatch.quantity" /></label>
+          <label class="field span-2"><span>Dispatched on</span><brq-date name="d" [(ngModel)]="dispatch.dispatchedOn" /></label>
+          <label class="field span-2"><span>Market</span><select name="m" [(ngModel)]="dispatch.marketId"><option [ngValue]="null">—</option>@for (m of b.markets; track m.id) {<option [ngValue]="m.marketId">{{ m.code }}</option>}</select></label>
+          <label class="field span-2"><span>Reference (invoice / delivery note)</span><input name="r" [(ngModel)]="dispatch.reference" /></label>
+        </div>
+        @if (modalError()) {<p class="error">{{ modalError() }}</p>}
+        <div class="actions"><button type="button" class="btn" (click)="dispatchOpen.set(false)">Cancel</button><button class="btn primary" [disabled]="busy()">Save</button></div>
+      </form>
+    </brq-modal>
+
+    <brq-modal [open]="changeOpen()" [title]="humanize(change.changeType) + ' – checklist change request'" (close)="changeOpen.set(false)">
+      <form class="form" (ngSubmit)="doChange()">
+        @if (change.changeType !== 'RemoveItem') {
+          <div class="form-grid">
+            <label class="field span-4"><span>Item name<em class="req">*</em></span><input name="n" [(ngModel)]="change.name" required /></label>
+            <label class="field span-2"><span>Owning department<em class="req">*</em></span><select name="d" [(ngModel)]="change.departmentId">@for (d of lk()?.departments; track d.id) {<option [ngValue]="d.id">{{ d.name }}</option>}</select></label>
+            <label class="field span-2"><span>Type</span><select name="t" [(ngModel)]="change.itemType">@for (t of lk()?.enums?.['itemTypes']; track t) {<option [value]="t">{{ t | label }}</option>}</select></label>
+            <label class="field span-2"><span>Stage</span><input name="s" [(ngModel)]="change.stage" /></label>
+            <label class="field"><span>Step</span><input type="number" name="seq" [(ngModel)]="change.sequence" /></label>
+            <label class="field"><span>Due</span><brq-date name="due" [(ngModel)]="change.dueDate" /></label>
+            <label class="checkbox span-4"><input type="checkbox" name="mand" [(ngModel)]="change.isMandatory" /> Mandatory for release</label>
+          </div>
+        } @else {<p>Remove <b>{{ itemName(change.checklistItemId) }}</b> from this batch's checklist.</p>}
+        <label class="field"><span>Reason for the change<em class="req">*</em></span><textarea name="r" [(ngModel)]="change.reason" rows="3" required></textarea></label>
+        <p class="small muted">The change is applied only after another authorised person approves it with an e-signature.</p>
+        @if (modalError()) {<p class="error">{{ modalError() }}</p>}
+        <div class="actions"><button type="button" class="btn" (click)="changeOpen.set(false)">Cancel</button><button class="btn primary" [disabled]="busy() || !change.reason?.trim()">Submit for approval</button></div>
+      </form>
+    </brq-modal>
+
+    <brq-sign [open]="!!decision()" [title]="decision()?.approve ? 'Approve checklist change' : 'Reject checklist change'"
+              [meaning]="decision()?.approve ? 'Checklist change approved' : 'Checklist change rejected'" [signer]="auth.user()?.fullName ?? ''"
+              commentLabel="Comment" [commentRequired]="!decision()?.approve" [busy]="busy()" [error]="modalError()" (signed)="decide($event)" (cancel)="decision.set(null)">
+      @if (decision(); as d) {<p>{{ d.cr.changeType | label }}: <b>{{ d.cr.proposedName || d.cr.itemName }}</b><br /><span class="small muted">Reason: {{ d.cr.reason }} – requested by {{ d.cr.requestedBy }}</span></p>}
+    </brq-sign>
+
+    <brq-modal [open]="qeOpen()" [title]="qe.id ? 'Update quality event' : 'Record quality event'" (close)="qeOpen.set(false)">
+      <form class="form" (ngSubmit)="saveQe()">
+        <div class="form-grid">
+          <label class="field span-2"><span>Type</span><select name="t" [(ngModel)]="qe.eventType">@for (t of lk()?.enums?.['qualityEventTypes']; track t) {<option [value]="t">{{ t | label }}</option>}</select></label>
+          <label class="field span-2"><span>Number<em class="req">*</em></span><input name="n" [(ngModel)]="qe.number" required /></label>
+          <label class="field span-4"><span>Description</span><input name="d" [(ngModel)]="qe.description" /></label>
+          <label class="field span-2"><span>Criticality</span><select name="c" [(ngModel)]="qe.criticality">@for (t of lk()?.enums?.['criticalities']; track t) {<option [value]="t">{{ t }}</option>}</select></label>
+          <label class="field span-2"><span>Status</span><select name="s" [(ngModel)]="qe.status"><option>Open</option><option>Closed</option></select></label>
+          <label class="field span-2"><span>Opened on</span><brq-date name="o" [(ngModel)]="qe.openedOn" /></label>
+          @if (qe.status === 'Closed') {<label class="field span-2"><span>Closed on<em class="req">*</em></span><brq-date name="cl" [(ngModel)]="qe.closedOn" /></label>}
+          @if (qe.id) {<label class="field span-4"><span>Reason for change<em class="req">*</em></span><input name="r" [(ngModel)]="qe.reason" /></label>}
+        </div>
+        <p class="small muted">Recorded manually. When the QMS integration is connected, events sync automatically and show their source.</p>
+        @if (modalError()) {<p class="error">{{ modalError() }}</p>}
+        <div class="actions"><button type="button" class="btn" (click)="qeOpen.set(false)">Cancel</button><button class="btn primary" [disabled]="busy()">Save</button></div>
+      </form>
+    </brq-modal>
+
+    <brq-modal [open]="mvOpen()" [title]="mv.id ? 'Update movement' : 'Record movement to external party'" [wide]="true" (close)="mvOpen.set(false)">
+      <form class="form" (ngSubmit)="saveMv()">
+        <div class="form-grid">
+          <label class="field span-2"><span>External party<em class="req">*</em></span><select name="p" [(ngModel)]="mv.externalPartyId">
+            @for (p of approvedParties(); track p.id) {<option [ngValue]="p.id" [disabled]="!p.isApproved">{{ p.name }} ({{ p.partyType | label }}){{ p.isApproved ? '' : ' – not approved' }}</option>}</select></label>
+          <label class="field"><span>Purpose</span><select name="pu" [(ngModel)]="mv.purpose">@for (t of lk()?.enums?.['movementPurposes']; track t) {<option [value]="t">{{ t | label }}</option>}</select></label>
+          <label class="field"><span>Status</span><select name="s" [(ngModel)]="mv.status">@for (t of lk()?.enums?.['movementStatuses']; track t) {<option [value]="t">{{ t | label }}</option>}</select></label>
+          <label class="field span-2"><span>Description</span><input name="d" [(ngModel)]="mv.description" /></label>
+          <label class="field"><span>Quantity</span><input type="number" name="q" [(ngModel)]="mv.quantity" /></label>
+          <label class="field"><span>Reference (PO / challan)</span><input name="r" [(ngModel)]="mv.reference" /></label>
+          <label class="field"><span>Sent on</span><brq-date name="so" [(ngModel)]="mv.sentOn" /></label>
+          <label class="field"><span>Received by vendor</span><brq-date name="rv" [(ngModel)]="mv.receivedByVendorOn" /></label>
+          <label class="field"><span>Expected return</span><brq-date name="er" [(ngModel)]="mv.expectedReturnOn" /></label>
+          <label class="field"><span>Returned on</span><brq-date name="ro" [(ngModel)]="mv.returnedOn" /></label>
+        </div>
+        @if (modalError()) {<p class="error">{{ modalError() }}</p>}
+        <div class="actions"><button type="button" class="btn" (click)="mvOpen.set(false)">Cancel</button><button class="btn primary" [disabled]="busy() || !mv.externalPartyId">Save</button></div>
+      </form>
+    </brq-modal>
+
+    <brq-modal [open]="mkOpen()" [title]="mk.isNew ? 'Add target market' : 'Update regulatory status'" (close)="mkOpen.set(false)">
+      <form class="form" (ngSubmit)="saveMk()">
+        @if (mk.isNew) {<label class="field"><span>Market<em class="req">*</em></span><select name="m" [(ngModel)]="mk.marketId">@for (m of availableMarkets(); track m.id) {<option [ngValue]="m.id">{{ m.code }} – {{ m.name }}</option>}</select></label>}
+        <label class="field"><span>Regulatory status</span><select name="s" [(ngModel)]="mk.regulatoryStatus">@for (t of lk()?.enums?.['regulatoryStatuses']; track t) {<option [value]="t">{{ t | label }}</option>}</select></label>
+        @if (mk.regulatoryStatus === 'Approved') {
+          <label class="field"><span>Approval reference<em class="req">*</em></span><input name="ref" [(ngModel)]="mk.approvalReference" /></label>
+          <label class="field"><span>Approved on</span><brq-date name="ao" [(ngModel)]="mk.approvedOn" /></label>
+        }
+        <label class="field"><span>Reason@if (mk.isNew) {<em class="req">*</em>}</span><input name="r" [(ngModel)]="mk.reason" /></label>
+        @if (modalError()) {<p class="error">{{ modalError() }}</p>}
+        <div class="actions"><button type="button" class="btn" (click)="mkOpen.set(false)">Cancel</button><button class="btn primary" [disabled]="busy()">Save</button></div>
+      </form>
+    </brq-modal>
+  } @else if (!error()) {<p class="muted">Loading…</p>}
+</div>
