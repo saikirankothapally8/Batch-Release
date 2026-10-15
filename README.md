@@ -56,6 +56,15 @@ from `backend/src/BatchReleaseIQ.Api` with `dotnet run -- --export-schema ../../
 | `mgmt.user` | Management – dashboard |
 | `admin` | Administrator – everything incl. roles, users, templates, settings |
 
+### Removing or loading the sample data
+From the API folder (or the IIS site folder, using `dotnet BatchReleaseIQ.Api.dll` instead of `dotnet run --`):
+```bash
+dotnet run -- --remove-sample-data   # empty system: roles, departments, settings and an admin user
+dotnet run -- --load-sample-data     # full demo data again
+```
+Both delete all data, audit trail included, and ask for the database name as confirmation (`--confirm <name>` for scripts).
+See [Hosting on IIS](docs/09-deploy-iis.md#6-removing-or-loading-the-sample-data).
+
 ### Configuration
 | Key | Meaning |
 |---|---|

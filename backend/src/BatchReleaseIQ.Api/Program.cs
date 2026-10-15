@@ -72,6 +72,9 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
 
 var app = builder.Build();
 
+// --remove-sample-data / --load-sample-data: run once from the command line and exit (see DataCommands).
+if (await BatchReleaseIQ.Api.DataCommands.TryRunAsync(app, args)) return;
+
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();

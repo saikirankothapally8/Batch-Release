@@ -85,6 +85,26 @@ Browse to `https://batchrelease.company.local/` – the login page appears. `/ap
 3. Copy the new files over the old ones – **do not overwrite `appsettings.Production.json`**.
 4. Delete `app_offline.htm`.
 
+## 6. Removing or loading the sample data
+Two commands empty the database and set it up again. They use the same settings as the site
+(`appsettings.json` + `appsettings.Production.json`), so run them from the site folder:
+```
+cd "D:\Sites\BatchReleaseIQ"
+dotnet BatchReleaseIQ.Api.dll --remove-sample-data
+dotnet BatchReleaseIQ.Api.dll --load-sample-data
+```
+| Command | Result |
+|---|---|
+| `--remove-sample-data` | Empty system: departments, standard roles, prioritisation settings and one `admin` user. The admin password comes from `--admin-password <password>`, else `Bootstrap:AdminPassword`, else you are asked for it |
+| `--load-sample-data` | The full demo data again: about 260 batches, demo users (password `Passw0rd!`), master data and templates |
+
+- Both **delete all data in the application's tables, including the audit trail and signatures**. Use them on a demo,
+  test or newly installed system, never on a database holding real GxP records.
+- They ask you to type the database name to confirm; a wrong name changes nothing. For scripts, pass it with
+  `--confirm <database name>`.
+- Stop the site first (put `app_offline.htm` in the folder, or stop the application pool), then start it again afterwards.
+- Only this application's tables are dropped and recreated; other objects in the same database are left alone.
+
 ## Troubleshooting
 | Symptom | Cause and fix |
 |---|---|
